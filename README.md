@@ -186,6 +186,40 @@ setTimeout(() => {
 
 ---
 
+## 🕐 Time & Greeting
+
+**Cara kerja:** Endpoint ini menampilkan waktu server saat ini dengan greeting yang sesuai berdasarkan jam.
+
+### Get Current Time
+
+```bash
+curl "http://localhost:3000/time"
+```
+
+Response:
+```json
+{
+  "greeting": "Good afternoon",
+  "timestamp": "2025-12-24T14:04:21.148Z",
+  "utc": "Wed, 24 Dec 2025 14:04:21 GMT",
+  "unix": 1766585061,
+  "timezone": "UTC",
+  "localTime": "12/24/2025, 2:04:21 PM",
+  "hour": 14,
+  "date": "Wed Dec 24 2025",
+  "time": "14:04:21"
+}
+```
+
+### Greeting Schedule
+
+- **5:00 - 11:59** → "Good morning"
+- **12:00 - 16:59** → "Good afternoon"
+- **17:00 - 20:59** → "Good evening"
+- **21:00 - 4:59** → "Good night"
+
+---
+
 ## 🏥 Health Check & Monitoring
 
 ### Cek Server Status
@@ -204,6 +238,7 @@ Response:
     "proxy": "/proxy?url=<target-url>",
     "download": "/download?url=<file-url>",
     "websocket": "/ws-proxy?url=<ws-url>",
+    "time": "/time",
     "health": "/health"
   },
   "features": ["HTTP/HTTPS proxy", "File download streaming", "WebSocket proxy"]
@@ -251,6 +286,11 @@ ws.onopen = () => {
   ws.send(JSON.stringify({ target: "wss://echo.websocket.org" }));
 };
 ws.onmessage = (event) => console.log(JSON.parse(event.data));
+
+// Get current time with greeting
+fetch('http://localhost:3000/time')
+  .then(res => res.json())
+  .then(data => console.log(`${data.greeting}! Current time: ${data.localTime}`));
 ```
 
 ### Python
@@ -280,6 +320,11 @@ response = requests.get(download_url, stream=True)
 with open("downloaded_file.zip", "wb") as f:
     for chunk in response.iter_content(chunk_size=8192):
         f.write(chunk)
+
+# Get current time
+time_response = requests.get("http://localhost:3000/time")
+time_data = time_response.json()
+print(f"{time_data['greeting']}! Current time: {time_data['localTime']}")
 ```
 
 ## Configuration

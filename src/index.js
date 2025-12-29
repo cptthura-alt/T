@@ -251,6 +251,33 @@ app.use('/api/*', (req, res) => {
   req.query = originalQuery;
 });
 
+// Time endpoint with greeting
+app.get('/time', (req, res) => {
+  const now = new Date();
+  const hour = now.getHours();
+  
+  let greeting = 'Good night';
+  if (hour >= 5 && hour < 12) {
+    greeting = 'Good morning';
+  } else if (hour >= 12 && hour < 17) {
+    greeting = 'Good afternoon';
+  } else if (hour >= 17 && hour < 21) {
+    greeting = 'Good evening';
+  }
+  
+  res.status(200).json({
+    greeting: greeting,
+    timestamp: now.toISOString(),
+    utc: now.toUTCString(),
+    unix: Math.floor(now.getTime() / 1000),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    localTime: now.toLocaleString(),
+    hour: hour,
+    date: now.toDateString(),
+    time: now.toTimeString().split(' ')[0]
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -263,6 +290,7 @@ app.get('/health', (req, res) => {
       download: '/download?url=<file-url>',
       websocket: '/ws-proxy?url=<ws-url>',
       pathBased: '/api/* (auto-routes to 119.13.101.169)',
+      time: '/time',
       health: '/health'
     },
     features: [
@@ -286,11 +314,13 @@ app.get('/', (req, res) => {
       proxy: 'ANY HTTP METHOD /proxy?url=<target-url>',
       download: 'ANY HTTP METHOD /download?url=<file-url>',
       websocket: 'WebSocket /ws-proxy?url=<ws-url>',
+      time: 'GET /time - Get current time with greeting',
       examples: [
         'GET /proxy?url=https://api.example.com/data',
         'POST /proxy?url=https://api.example.com/auth',
         'GET /download?url=https://example.com/largefile.zip',
-        'WebSocket connection to ws://localhost:3000/ws-proxy with x-target-url header'
+        'WebSocket connection to ws://localhost:3000/ws-proxy with x-target-url header',
+        'GET /time - Get current server time'
       ]
     },
     health: 'GET /health',
@@ -306,7 +336,8 @@ app.get('/', (req, res) => {
       'Large file download streaming',
       'WebSocket proxy support',
       'Range request support',
-      'Download progress tracking'
+      'Download progress tracking',
+      'Time and greeting endpoint'
     ]
   });
 });
@@ -502,7 +533,7 @@ app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Not Found',
     message: 'Endpoint not found',
-    availableEndpoints: ['/proxy', '/download', '/ws-proxy', '/api/*', '/health', '/']
+    availableEndpoints: ['/proxy', '/download', '/ws-proxy', '/api/*', '/time', '/health', '/']
   });
 });
 
@@ -635,6 +666,7 @@ server.listen(PORT, () => {
   console.log(`🔗 Proxy endpoint: http://localhost:${PORT}/proxy?url=<target-url>`);
   console.log(`💾 Download endpoint: http://localhost:${PORT}/download?url=<file-url>`);
   console.log(`🔌 WebSocket endpoint: http://localhost:${PORT}/ws-proxy?url=<ws-url>`);
+  console.log(`🕐 Time endpoint: http://localhost:${PORT}/time`);
   console.log(`🛠️  Using pure Node.js HTTP/HTTPS modules (no external proxy libraries)`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
