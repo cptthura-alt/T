@@ -329,31 +329,151 @@ print(f"{time_data['greeting']}! Current time: {time_data['localTime']}")
 
 ## Configuration
 
-Environment variables di `.env`:
+Environment variables di `.env` (copy dari `.env.example`):
 
 ```env
 PORT=3000
-NODE_ENV=development
+NODE_ENV=production
 CORS_ORIGIN=*
+
+# Rate Limiting (requests per 15 minutes)
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+RATE_LIMIT_PROXY_MAX=50
+
+# Proxy Configuration
+PROXY_TIMEOUT=30000
+PROXY_FOLLOW_REDIRECTS=true
+
+# Logging
+LOG_LEVEL=info
 ```
+
+**Important:** Never commit `.env` file to version control. Use `.env.example` as template.
+
+## Security Features
+
+- ✅ **Rate Limiting**: Protects against DoS attacks (100 req/15min general, 50 req/15min for proxy)
+- ✅ **SSRF Protection**: Blocks localhost and private IP ranges (10.x, 172.16-31.x, 192.168.x)
+- ✅ **Security Headers**: Helmet.js with CSP, HSTS, and other security headers
+- ✅ **Input Validation**: URL validation and sanitization
+- ✅ **Request Size Limits**: 10MB limit for request body
+- ✅ **Error Handling**: Prevents information leakage in production mode
+- ✅ **SSL Bypass**: For development (use with caution in production)
 
 ## Deployment
 
-### PM2
+### Production Checklist
+
+Before deploying to production:
+
+1. ✅ Set `NODE_ENV=production` in your `.env`
+2. ✅ Configure `CORS_ORIGIN` to specific domains (not `*`)
+3. ✅ Review and adjust rate limits for your use case
+4. ✅ Set up HTTPS/TLS (use reverse proxy like nginx)
+5. ✅ Configure firewall rules
+6. ✅ Set up monitoring and logging
+7. ✅ Never expose `.env` file
+8. ✅ Keep dependencies updated (`npm audit`)
+
+### PM2 (Process Manager)
 ```bash
-pm2 start src/index.js --name "proxy"
+# Install PM2 globally
+npm install -g pm2
+
+# Start the proxy server
+pm2 start src/index.js --name "proxy-server"
+
+# View logs
+pm2 logs proxy-server
+
+# Monitor
+pm2 monit
+
+# Auto-restart on system reboot
+pm2 startup
+pm2 save
 ```
 
 ### Docker
 ```dockerfile
-FROM node:18-alpine
+FROM node:20-alpine
+
+# Create app directory
 WORKDIR /app
+
+# Copy package files
 COPY package*.json ./
+
+# Install production dependencies only
 RUN npm ci --only=production
-COPY . .
+
+# Copy source code
+COPY src ./src
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Change ownership
+RUN chown -R nodejs:nodejs /app
+
+# Switch to non-root user
+USER nodejs
+
+# Expose port
 EXPOSE 3000
-USER node
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+# Start server
 CMD ["npm", "start"]
+```
+
+Build and run:
+```bash
+docker build -t proxy-server .
+docker run -d -p 3000:3000 --name proxy-server \
+  -e NODE_ENV=production \
+  -e CORS_ORIGIN=https://yourdomain.com \
+  proxy-server
+```
+
+### Vercel (Serverless)
+
+Already configured via `vercel.json`. Deploy with:
+
+```bash
+npm install -g vercel
+vercel
+```
+
+### Nginx Reverse Proxy
+
+For production, use nginx as reverse proxy with SSL:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name proxy.yourdomain.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
 ```
 
 ## Examples
@@ -373,17 +493,52 @@ response = requests.get(proxyUrl)
 
 ## Troubleshooting
 
-**Masalah Umum:**
+**Common Issues:**
 
-1. **404 Not Found** - URL target tidak ada → Cek URL langsung
-2. **Connection timeout** - Server tidak reachable → Cek koneksi/network
-3. **SSL Certificate Error** - SSL kadaluarsa → Proxy bypass otomatis
-4. **Invalid URL format** - URL salah format → Gunakan URL encoding
+1. **404 Not Found** - Target URL doesn't exist → Check URL directly
+2. **Connection timeout** - Server not reachable → Check network/firewall
+3. **SSL Certificate Error** - SSL expired → Proxy bypasses automatically (use with caution)
+4. **Invalid URL format** - Wrong URL format → Use proper URL encoding
+5. **429 Too Many Requests** - Rate limit exceeded → Wait 15 minutes or adjust limits
+6. **SSRF Protection Error** - Trying to access private IPs → This is blocked for security
 
-**Tips Debug:**
-- Lihat server logs untuk detail error
-- Test URL langsung sebelum diproxy
-- Gunakan browser dev tools
+**Debug Tips:**
+- Check server logs for detailed errors
+- Test target URL directly before proxying
+- Use browser developer tools
+- Verify environment variables are set correctly
+- Check rate limit headers in response
+
+**Rate Limit Headers:**
+- `RateLimit-Limit`: Maximum requests allowed
+- `RateLimit-Remaining`: Requests remaining in window
+- `RateLimit-Reset`: Time when limit resets
+
+## Monitoring & Logging
+
+Monitor your proxy server:
+
+```bash
+# View logs with PM2
+pm2 logs proxy-server
+
+# View Docker logs
+docker logs -f proxy-server
+
+# Check server health
+curl http://localhost:3000/health
+```
+
+## Security Considerations
+
+⚠️ **Important Security Notes:**
+
+1. **Private Network Access**: The proxy blocks access to private IP ranges by default (localhost, 10.x.x.x, 172.16-31.x.x, 192.168.x.x)
+2. **SSL Certificate Bypass**: The proxy bypasses SSL certificate validation - use only in trusted environments
+3. **Public Exposure**: Do NOT expose this proxy directly to the public internet without additional security measures
+4. **Authentication**: Consider adding authentication/API keys for production use
+5. **Allowed Domains**: Use domain whitelisting in production environments
+6. **Regular Updates**: Run `npm audit` regularly and keep dependencies updated
 
 ## License
 
