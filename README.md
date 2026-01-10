@@ -2,6 +2,15 @@
 
 Proxy server untuk mengakses HTTP/HTTPS API, download file, dan WebSocket connection melalui proxy. Support SSL certificate bypass dan file besar.
 
+## 🔒 Security Features
+
+This proxy server includes multiple security layers:
+- **Rate Limiting**: 100 requests per 15 minutes per IP
+- **SSRF Protection**: Blocks access to private IP ranges
+- **Input Validation**: Validates all URLs and parameters
+- **Security Headers**: Uses Helmet.js for HTTP security
+- **Request Logging**: Audit trail for all requests
+
 ## Quick Start
 
 ```bash
@@ -335,7 +344,31 @@ Environment variables di `.env`:
 PORT=3000
 NODE_ENV=development
 CORS_ORIGIN=*
+
+# SSRF Protection - Allow specific private IPs (comma-separated)
+# Example: ALLOWED_HOSTS=119.13.101.169,localhost
+ALLOWED_HOSTS=
 ```
+
+## Security Features
+
+### Rate Limiting
+- Automatically limits each IP to 100 requests per 15 minutes
+- Prevents DoS attacks and abuse
+- Returns HTTP 429 (Too Many Requests) when limit exceeded
+
+### SSRF Protection
+- Blocks access to private IP ranges (localhost, 127.x.x.x, 10.x.x.x, 192.168.x.x, 172.16-31.x.x)
+- Prevents access to internal resources
+- Can whitelist specific IPs via `ALLOWED_HOSTS` environment variable
+- Returns HTTP 403 (Forbidden) for blocked requests
+
+### Other Security Measures
+- Helmet.js for HTTP headers security
+- CORS configuration
+- SSL certificate validation bypass for specific use cases
+- Request logging for audit trails
+- Input validation and sanitization
 
 ## Deployment
 
