@@ -5,14 +5,61 @@ const { URL } = require('url');
 const cors = require('cors');
 const helmet = require('helmet');
 const WebSocket = require('ws');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Rate limiting configuration
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: {
+    error: 'Too Many Requests',
+    message: 'Too many requests from this IP, please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+// Stricter rate limit for proxy endpoints
+const proxyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 50, // Limit each IP to 50 proxy requests per windowMs
+  message: {
+    error: 'Too Many Requests',
+    message: 'Too many proxy requests from this IP, please try again later.',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Middleware
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
+    },
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  },
+  noSniff: true,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  permittedCrossDomainPolicies: { permittedPolicies: 'none' }
 }));
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*',
@@ -21,13 +68,41 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Apply general rate limiter to all routes
+app.use(limiter);
+
 // Utility functions
 const isValidUrl = (urlString) => {
   try {
     const url = new URL(urlString);
-    return ['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol);
+    // Only allow http, https, ws, wss protocols
+    if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) {
+      return false;
+    }
+    // Block localhost and private IP ranges for security
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+      return false;
+    }
+    // Block private IP ranges (10.x.x.x, 172.16-31.x.x, 192.168.x.x)
+    if (hostname.match(/^10\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.|^192\.168\./)) {
+      return false;
+    }
+    return true;
   } catch {
     return false;
+  }
+};
+
+const sanitizeUrl = (urlString) => {
+  try {
+    const url = new URL(urlString);
+    // Remove any auth credentials from URL if present
+    url.username = '';
+    url.password = '';
+    return url.toString();
+  } catch {
+    return urlString;
   }
 };
 
@@ -200,7 +275,7 @@ const proxyRequest = (req, res) => {
       res.status(500).json({
         error: 'Internal Server Error',
         message: 'Failed to proxy request',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        details: process.env.NODE_ENV === 'development' ? error.message : 'An error occurred while processing your request'
       });
     });
 
@@ -228,16 +303,16 @@ const proxyRequest = (req, res) => {
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to setup proxy request',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      details: process.env.NODE_ENV === 'development' ? error.message : 'An error occurred while processing your request'
     });
   }
 };
 
 // Proxy endpoint - supports all HTTP methods
-app.all('/proxy', proxyRequest);
+app.all('/proxy', proxyLimiter, proxyRequest);
 
 // Alternative path-based proxy for direct routing
-app.use('/api/*', (req, res) => {
+app.use('/api/*', proxyLimiter, (req, res) => {
   const apiPath = req.originalUrl;
   const targetUrl = `https://119.13.101.169${apiPath}`;
 
@@ -343,7 +418,7 @@ app.get('/', (req, res) => {
 });
 
 // Enhanced file download endpoint
-app.all('/download', (req, res) => {
+app.all('/download', proxyLimiter, (req, res) => {
   const targetUrl = req.query.url;
   const method = req.method;
 
@@ -467,7 +542,7 @@ app.all('/download', (req, res) => {
       res.status(500).json({
         error: 'Internal Server Error',
         message: 'Failed to setup download request',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        details: process.env.NODE_ENV === 'development' ? error.message : 'An error occurred while processing your request'
       });
     });
 
@@ -489,7 +564,7 @@ app.all('/download', (req, res) => {
     res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to setup download request',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      details: process.env.NODE_ENV === 'development' ? error.message : 'An error occurred while processing your request'
     });
   }
 });
@@ -543,7 +618,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({
     error: 'Internal Server Error',
     message: 'An unexpected error occurred',
-    details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    details: process.env.NODE_ENV === 'development' ? err.message : 'Please try again later'
   });
 });
 

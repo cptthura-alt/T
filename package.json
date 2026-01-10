@@ -1,7 +1,7 @@
 {
   "name": "secure-proxy-server",
   "version": "1.0.0",
-  "description": "Native Node.js proxy server for accessing HTTP APIs through HTTPS",
+  "description": "Secure native Node.js proxy server with rate limiting, SSRF protection, and comprehensive security features",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -11,15 +11,31 @@
   "keywords": [
     "proxy",
     "http-proxy",
+    "https-proxy",
+    "secure-proxy",
     "express",
-    "nodejs"
+    "nodejs",
+    "rate-limiting",
+    "security",
+    "ssrf-protection",
+    "websocket-proxy",
+    "file-download"
   ],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cptthura-alt/T.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cptthura-alt/T/issues"
+  },
+  "homepage": "https://github.com/cptthura-alt/T#readme",
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "express-rate-limit": "^8.2.1",
     "helmet": "^7.1.0",
     "ws": "^8.18.3"
   },
