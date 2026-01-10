@@ -4,6 +4,7 @@ const https = require('https');
 const { URL } = require('url');
 const cors = require('cors');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const WebSocket = require('ws');
 require('dotenv').config();
 
@@ -21,6 +22,21 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Rate limiting to prevent abuse
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: {
+    error: 'Too Many Requests',
+    message: 'Too many requests from this IP, please try again later',
+    retryAfter: '15 minutes'
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+app.use(limiter);
+
 // Utility functions
 const isValidUrl = (urlString) => {
   try {
@@ -28,6 +44,47 @@ const isValidUrl = (urlString) => {
     return ['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol);
   } catch {
     return false;
+  }
+};
+
+// Sanitize URL to prevent SSRF and other attacks
+const sanitizeUrl = (urlString) => {
+  try {
+    const url = new URL(urlString);
+    
+    // Prevent access to private IP ranges and localhost
+    const hostname = url.hostname.toLowerCase();
+    const privateIpPatterns = [
+      /^localhost$/i,
+      /^127\./,
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+      /^192\.168\./,
+      /^169\.254\./,
+      /^::1$/,
+      /^fe80:/,
+      /^fc00:/,
+      /^fd00:/
+    ];
+    
+    // Allow specific IPs if defined in environment
+    const allowedHosts = process.env.ALLOWED_HOSTS ? 
+      process.env.ALLOWED_HOSTS.split(',').map(h => h.trim().toLowerCase()) : [];
+    
+    if (allowedHosts.includes(hostname)) {
+      return urlString;
+    }
+    
+    // Check if hostname matches private IP patterns
+    const isPrivate = privateIpPatterns.some(pattern => pattern.test(hostname));
+    
+    if (isPrivate) {
+      throw new Error('Access to private/internal resources is not allowed');
+    }
+    
+    return urlString;
+  } catch (error) {
+    throw error;
   }
 };
 
@@ -63,6 +120,16 @@ const proxyRequest = (req, res) => {
       error: 'Bad Request',
       message: 'Invalid URL format',
       details: 'URL must be a valid HTTP or HTTPS URL'
+    });
+  }
+
+  // Sanitize URL to prevent SSRF attacks
+  try {
+    sanitizeUrl(targetUrl);
+  } catch (error) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: error.message || 'Access to this URL is not allowed'
     });
   }
 
@@ -364,6 +431,16 @@ app.all('/download', (req, res) => {
     });
   }
 
+  // Sanitize URL to prevent SSRF attacks
+  try {
+    sanitizeUrl(targetUrl);
+  } catch (error) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: error.message || 'Access to this URL is not allowed'
+    });
+  }
+
   try {
     const parsedUrl = new URL(targetUrl);
     const httpModule = getHttpModule(parsedUrl.protocol);
@@ -514,6 +591,16 @@ app.get('/ws-proxy', (req, res) => {
     });
   }
 
+  // Sanitize URL to prevent SSRF attacks
+  try {
+    sanitizeUrl(targetUrl);
+  } catch (error) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: error.message || 'Access to this URL is not allowed'
+    });
+  }
+
   res.json({
     message: 'WebSocket proxy endpoint',
     instructions: [
@@ -558,6 +645,21 @@ server.on('upgrade', (request, socket, head) => {
 
   if (!targetUrl) {
     socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  // Validate and sanitize WebSocket URL
+  if (!isValidUrl(targetUrl) || !targetUrl.match(/^wss?:\/\//)) {
+    socket.write('HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nInvalid WebSocket URL format\r\n');
+    socket.destroy();
+    return;
+  }
+
+  try {
+    sanitizeUrl(targetUrl);
+  } catch (error) {
+    socket.write('HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\n' + error.message + '\r\n');
     socket.destroy();
     return;
   }
